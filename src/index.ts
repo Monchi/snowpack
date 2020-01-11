@@ -33,6 +33,7 @@ export interface InstallOptions {
   isStrict?: boolean;
   isOptimized?: boolean;
   isBabel?: boolean;
+  legacy?: string;
   hasBrowserlistConfig?: boolean;
   isExplicit?: boolean;
   namedExports?: {[filepath: string]: string[]};
@@ -65,6 +66,7 @@ ${chalk.bold('Advanced:')}
     --remote-package    "name,version" pair(s) of packages that should be left unbundled and referenced remotely.
                         Example: "foo,v4" will rewrite all imports of "foo" to "{remoteUrl}/foo/v4" (see --remote-url).
     --remote-url        Configures the domain where remote imports point to (default: "https://cdn.pika.dev")
+    --legacy            Specify legacy output filename for older browsers
     `.trim(),
   );
 }
@@ -168,10 +170,12 @@ export async function install(
     isCleanInstall,
     destLoc,
     hasBrowserlistConfig,
+    include,
     isExplicit,
     isStrict,
     isBabel,
     isOptimized,
+    legacy,
     sourceMap,
     namedExports,
     remoteUrl,
@@ -326,6 +330,28 @@ export async function install(
     };
     const packageBundle = await rollup.rollup(inputOptions);
     await packageBundle.write(outputOptions);
+
+    if (include && legacy) {
+      function renameImportPlugin() {
+        return {
+          name: 'rename-import-plugin',
+          resolveId(source) {
+            if (source.startsWith('/web_modules/')) {
+              return {
+                id: source.replace(/^\/web_modules\//, path.join(cwd, 'node_modules', path.sep)),
+              };
+            }
+            return null;
+          },
+        };
+      }
+      const noModuleBundle = await rollup.rollup({
+        input: glob.sync(include),
+        plugins: [renameImportPlugin(), ...inputOptions.plugins],
+      });
+      await noModuleBundle.write({file: legacy, format: 'iife'});
+    }
+
     fs.writeFileSync(
       path.join(destLoc, 'import-map.json'),
       JSON.stringify({imports: importMap}, undefined, 2),
@@ -347,6 +373,7 @@ export async function cli(args: string[]) {
     exclude = ['**/__tests__/*', '**/*.@(spec|test).@(js|mjs)'],
     optimize = false,
     include,
+    legacy,
     strict = false,
     clean = false,
     dest = 'web_modules',
@@ -408,10 +435,12 @@ export async function cli(args: string[]) {
     isCleanInstall: clean,
     destLoc,
     namedExports,
+    include,
     isExplicit,
     isStrict: strict,
     isBabel: babel || optimize,
     isOptimized: optimize,
+    legacy,
     sourceMap,
     remoteUrl,
     hasBrowserlistConfig,
